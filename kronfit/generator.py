@@ -3,7 +3,7 @@ import argparse
 
 DATA_ROOT = "/ourdisk/hpc/soonerhpclab/dont_archive/moezdurrani/data"
 EXPERIMENT_ROOT = "/ourdisk/hpc/soonerhpclab/dont_archive/moezdurrani/experiments/kronfit"
-KRONFIT_DIR = os.path.expanduser("~/kronfit/snap/examples/kronfit")
+KRONFIT_DIR = os.path.expanduser("~/snap/examples/kronfit")
 PROJECT_ROOT = os.path.expanduser("~/kronfit")
 SBATCH_DIR = os.path.join(PROJECT_ROOT, "sbatches")
 LOG_DIR = os.path.join(PROJECT_ROOT, "logs")
