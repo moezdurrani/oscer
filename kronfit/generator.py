@@ -13,7 +13,7 @@ LOW_K_THRESHOLD, HIGH_K_THRESHOLD = 15, 21
 # Run times (seconds) for kronfit per k values
 RUN_TIMES = {1:41.67, 2:44.36, 3:45, 4:45, 5:45, 6:46, 7:47, 8:48, 9:49, 10:50.34, 11:54.32, 12:62.08, 13:73.1, 14:94.89, 15:110.68, 16:133.99, 17:172.53, 18:221.04, 19:301.07, 20:463.76, 21:792.02, 22:1401.45, 23:2767.17}
 
-def write_sbatch_header(f, dataset, k, time_string, k_start, k_end, sample):
+def write_sbatch_header(f, dataset, k, k_start, k_end, sample):
     f.write("#!/bin/bash\n")
     f.write(f"#SBATCH --partition={PARTITION}\n")
     # f.write("set -e\n")
@@ -31,47 +31,55 @@ def write_sbatch_header(f, dataset, k, time_string, k_start, k_end, sample):
         f.write(f"#SBATCH --output={LOG_DIR}/{dataset}/k{k}_s{sample}_%J_out.txt\n")
         f.write(f"#SBATCH --error={LOG_DIR}/{dataset}/k{k}_s{sample}_%J_err.txt\n")
         f.write(f"#SBATCH --job-name={dataset}_k{k}_s{sample}\n")
-    f.write(f"#SBATCH --time={time_string}\n")
-    f.write("#SBATCH --mail-user=moezdurrani@ou.edu\n")
-    f.write("#SBATCH --mail-type=END,FAIL\n")
-    f.write(f"#SBATCH --chdir={PROJECT_ROOT}\n\n")
-    f.write("#SBATCH --cpus-per-task=1\n")
 
-    f.write("module purge\n")
-    f.write("module load GCC/13.3.0\n")
-    f.write("module load Python/3.10.4-GCCcore-11.3.0\n")
-    # f.write("module load CUDA/12.1.1\n")
-    # f.write("source ~/pyenv/bin/activate\n\n")
+    # These need to be added after the time requeted is calculated    
+    remaining = []
+    remaining.append("#SBATCH --mail-user=moezdurrani@ou.edu\n")
+    remaining.append("#SBATCH --mail-type=END,FAIL\n")
+    remaining.append(f"#SBATCH --chdir={PROJECT_ROOT}\n")
+    remaining.append("#SBATCH --cpus-per-task=1\n")
+    remaining.append("module load GCC/13.3.0\n")
+    remaining.append("module load Python/3.10.4-GCCcore-11.3.0\n")
+    remaining.append("hostname\npwd\nwhich python3\npython3 --version\n\n")
 
-    f.write("hostname\npwd\nwhich python3\npython3 --version\n\n")
+    # f.write(f"#SBATCH --time={time_string}\n")
+    # f.write("#SBATCH --mail-user=moezdurrani@ou.edu\n")
+    # f.write("#SBATCH --mail-type=END,FAIL\n")
+    # f.write(f"#SBATCH --chdir={PROJECT_ROOT}\n\n")
+    # f.write("#SBATCH --cpus-per-task=1\n")
 
+    # f.write("module purge\n")
+    # f.write("module load GCC/13.3.0\n")
+    # f.write("module load Python/3.10.4-GCCcore-11.3.0\n")
+        # f.write("module load CUDA/12.1.1\n")
+        # f.write("source ~/pyenv/bin/activate\n\n")
 
-# def create_sbatch(experiments_dir, data_dir, fname, dataset):
-def create_sbatch(k, samples,dataset, k_start, k_end, sample):
-    """Creates one sbatch file for each k value with its 30 samples"""
-    if sample == -1:
-        sbatch_path = f"{SBATCH_DIR}/{dataset}_k{k}.sbatch"
-        if k < LOW_K_THRESHOLD:
-            tot_exp_time = 1
-            for kk in range(k_start, LOW_K_THRESHOLD):
-                tot_exp_time += RUN_TIMES[kk]  * samples
-            tot_exp_time = (tot_exp_time * 1.2) + 600
-        else:
-            tot_exp_time = (RUN_TIMES[k]  * samples * 1.2) + 600
-    else:
-        sbatch_path = f"{SBATCH_DIR}/{dataset}_k{k}_s{sample}.sbatch"
-        tot_exp_time = (RUN_TIMES[k] * 1.2) + 600 
+    # f.write("hostname\npwd\nwhich python3\npython3 --version\n\n")
+    return remaining
 
-    sb_write = open(sbatch_path, "w")
-    # tot_exp_time = (RUN_TIMES[k]  * samples * 1.2) + 600 # Buffer time + expected time for the job to run
+def write_remaining_header(tot_exp_time, remaining, sb_write):
+    tot_exp_time = (tot_exp_time * 1.2) + 600
     hrs = tot_exp_time // 3600
     rem_secs = tot_exp_time % 3600
     mins = rem_secs // 60
     secs = rem_secs % 60
     time_string = f"{int(hrs):02}:{int(mins):02}:{int(secs):02}"
-    write_sbatch_header(sb_write, dataset, k, time_string, k_start, k_end, sample)
-        
-    return sbatch_path, sb_write
+    sb_write.write(f"#SBATCH --time={time_string}\n")
+    for lines in remaining:
+        sb_write.write(lines)
+
+
+# def create_sbatch(experiments_dir, data_dir, fname, dataset):
+def create_sbatch(k,dataset, k_start, k_end, sample):
+    """Creates one sbatch file for each k value with its 30 samples"""
+    if sample == -1:
+        sbatch_path = f"{SBATCH_DIR}/{dataset}_k{k}.sbatch"
+    else:
+        sbatch_path = f"{SBATCH_DIR}/{dataset}_k{k}_s{sample}.sbatch"
+
+    sb_write = open(sbatch_path, "w")
+    remaining = write_sbatch_header(sb_write, dataset, k, k_start, k_end, sample)    
+    return sbatch_path, sb_write, remaining
 
 def specific(k_start, k_end, samples, dataset, runf):
     data_dir = os.path.join(DATA_ROOT, dataset)
@@ -92,13 +100,15 @@ def specific(k_start, k_end, samples, dataset, runf):
         # if k is less than lower threshold
         if k < LOW_K_THRESHOLD:
             if not sbatch_created:
-                sbatch_path, sb_write = create_sbatch(k, samples, dataset, k_start, k_end, sample=-1)
+                sbatch_path, sb_write, remaining = create_sbatch(k, dataset, k_start, k_end, sample=-1)
                 sbatch_created = True
+                tot_exp_time = 0
             for s in range(1, samples+1):
                 data_name, exp_name = f"k{k}_s{s}.txt", f"k{k}_s{s}.json"
                 if data_name in existing_data and exp_name not in existing_experiments:
-                    sb_write.write(
-                        f"{KRONFIT_DIR} "
+                    tot_exp_time += RUN_TIMES[k]
+                    remaining.append(
+                        f"{KRONFIT_DIR}/kronfit "
                         f"-i:{data_dir}/{data_name} "
                         f"-o:{experiments_dir}/{exp_name} "
                         f"-gi:100 -s:100000\n"
@@ -107,42 +117,50 @@ def specific(k_start, k_end, samples, dataset, runf):
         # if k is between lower and high threshold
         elif k < HIGH_K_THRESHOLD:
             if sbatch_created:
+                write_remaining_header(tot_exp_time, remaining, sb_write)
                 sb_write.close()
                 runf.write(f"sbatch {sbatch_path}\n")
                 sbatch_created = False
-            sbatch_path, sb_write = create_sbatch(k, samples, dataset, k_start, k_end, sample=-1)
+            sbatch_path, sb_write, remaining = create_sbatch(k, dataset, k_start, k_end, sample=-1)
+            tot_exp_time = 0
             for s in range(1, samples+1):
                 data_name, exp_name = f"k{k}_s{s}.txt", f"k{k}_s{s}.json"
                 if data_name in existing_data and exp_name not in existing_experiments:
-                    sb_write.write(
-                        f"{KRONFIT_DIR} "
+                    tot_exp_time += RUN_TIMES[k]
+                    remaining.append(
+                        f"{KRONFIT_DIR}/kronfit "
                         f"-i:{data_dir}/{data_name} "
                         f"-o:{experiments_dir}/{exp_name} "
                         f"-gi:100 -s:100000\n"
                     )
+            write_remaining_header(tot_exp_time, remaining, sb_write)
             sb_write.close()
             runf.write(f"sbatch {sbatch_path}\n")
 
         # if k is greater than high threshold
         else:
             if sbatch_created:
+                write_remaining_header(tot_exp_time, remaining, sb_write)
                 sb_write.close()
                 runf.write(f"sbatch {sbatch_path}\n")
                 sbatch_created = False
             for s in range(1, samples+1):
                 data_name, exp_name = f"k{k}_s{s}.txt", f"k{k}_s{s}.json"
                 if data_name in existing_data and exp_name not in existing_experiments:
-                    sbatch_path, sb_write = create_sbatch(k, samples, dataset, k_start, k_end, s)
-                    sb_write.write(
-                        f"{KRONFIT_DIR} "
+                    sbatch_path, sb_write, remaining = create_sbatch(k, dataset, k_start, k_end, s)
+                    tot_exp_time = RUN_TIMES[k]
+                    remaining.append(
+                        f"{KRONFIT_DIR}/kronfit "
                         f"-i:{data_dir}/{data_name} "
                         f"-o:{experiments_dir}/{exp_name} "
                         f"-gi:100 -s:100000\n"
                     )
+                    write_remaining_header(tot_exp_time, remaining, sb_write)
                     sb_write.close()
                     runf.write(f"sbatch {sbatch_path}\n")
 
     if sbatch_created:
+        write_remaining_header(tot_exp_time, remaining, sb_write)
         sb_write.close()
         runf.write(f"sbatch {sbatch_path}\n")
 
