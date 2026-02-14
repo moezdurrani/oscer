@@ -32,3 +32,4 @@ run_batches:
 clean:
 	rm -f $(SBATCHDIR)/*.sbatch
 	rm -f run_all_batches.sh
+#	rm -rf $(LOGDIR)/*
