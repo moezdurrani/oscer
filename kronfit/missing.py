@@ -12,7 +12,7 @@ def specific(k_start, k_end, samples, dataset):
 	i=0
 	for k in range(k_start, k_end+1):
 		for s in range(1, samples+1):
-			fname = f"k{k}_s{s}.txt"
+			fname = f"k{k}_s{s}.json"
 			if fname not in existing:
 				i += 1
 				print(fname)
