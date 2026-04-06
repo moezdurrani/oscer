@@ -135,13 +135,18 @@ def run_mcmc_numba(steps, n_nodes, n_edges, k, lp00, lp01, lp10, lp11,
 # MAIN PYTORCH CLASS
 # ------------------------------------------------------------------ 
 class mfit:
-    def __init__(self, graph_temp,init_matrix, learning_rate=0.05, device=None):
+    def __init__(self, graph_file_path, init_matrix, iterations, warmup_mcmc, mcmc_per_iter, learning_rate=0.05, device=None):
 
         if device is None:
             self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         else:
             self.device = device
         print(f"Using device: {self.device}")
+
+        self.iterations = iterations
+        self.warmup_mcmc = warmup_mcmc
+        self.mcmc_per_iter = mcmc_per_iter
+        graph_temp = nx.read_edgelist(graph_file_path, nodetype=int, create_using=nx.DiGraph(), comments="#")
 
         self.is_directed = False
         for u, v in graph_temp.edges():
@@ -277,22 +282,22 @@ class mfit:
 
         return ll_empty + torch.sum(ll_edges_actual - ll_edges_fake_no_edge)
 
-    def fit(self, iterations, warmup_mcmc, mcmc_per_iter):
-        print(f"\nMCMC Numba Warm-up ({warmup_mcmc} steps)")
+    def fit(self):
+        print(f"\nMCMC Numba Warm-up ({self.warmup_mcmc} steps)")
         
         # Pre-calculate logarithms to pass into Numba
         lp00, lp01 = math.log(self.p00.item()), math.log(self.p01.item())
         lp10, lp11 = math.log(self.p10.item()), math.log(self.p11.item())
         
         accepted_swaps = run_mcmc_numba(
-            warmup_mcmc, self.n_nodes, self.n_edges, self.k,
+            self.warmup_mcmc, self.n_nodes, self.n_edges, self.k,
             lp00, lp01, lp10, lp11,
             self.perm_np, self.inv_perm_np, self.numba_edge_list,
             self.numba_node_offsets, self.numba_node_edges
         )
-        print(f"Warm-up acceptance rate: {accepted_swaps/(warmup_mcmc or 1):.2%}")
+        print(f"Warm-up acceptance rate: {accepted_swaps/(self.warmup_mcmc or 1):.2%}")
 
-        print(f"\nMain Optimization ({iterations} iterations)")
+        print(f"\nMain Optimization ({self.iterations} iterations)")
         best_ll = float('-inf')
         best_P = [self.p00.item(), self.p01.item(), self.p10.item(), self.p11.item()]
 
@@ -301,9 +306,9 @@ class mfit:
         # This allows us to sample the gradient multiple times across the Markov Chain,
         # providing a highly stable, averaged gradient ensemble to the Adam optimizer.
         num_chunks = 10
-        chunk_size = max(1, mcmc_per_iter // num_chunks)
+        chunk_size = max(1, self.mcmc_per_iter // num_chunks)
 
-        for iteration in range(iterations):
+        for iteration in range(self.iterations):
             iter_start_time = time.time()
             self.optimizer.zero_grad()
             
@@ -361,9 +366,9 @@ class mfit:
             elapsed = time.time() - iter_start_time
             
             print(
-                f"\n{iteration+1:3d}/{iterations}] "
+                f"\n{iteration+1:3d}/{self.iterations}] "
                 f"LL: {current_ll:12.2f}  Best LL: {best_ll:12.2f}  "
-                f"Wu: {mcmc_accepted / max(mcmc_per_iter, 1):5.1%}  "
+                f"Wu: {mcmc_accepted / max(self.mcmc_per_iter, 1):5.1%}  "
                 f"Time: {elapsed:.1f}s"
             )
             print(
@@ -392,12 +397,16 @@ def main():
     parser.add_argument("--grad_samples", type=int, default=100000)
     args = parser.parse_args()
     start_time = time.time()
-
-    print("Loading and preparing graph...")
-    graph = nx.read_edgelist(args.file_path, nodetype=int, create_using=nx.DiGraph(), comments="#")
     
-    fitter = mfit(graph, args.init_matrix, learning_rate=args.lr)
-    best_P, best_ll = fitter.fit(iterations=args.iterations, warmup_mcmc=args.warmup_mcmc, mcmc_per_iter=args.grad_samples)
+    fitter = mfit(
+        graph_file_path=args.file_path, 
+        init_matrix=args.init_matrix, 
+        iterations=args.iterations, 
+        warmup_mcmc=args.warmup_mcmc, 
+        mcmc_per_iter=args.grad_samples,
+        learning_rate=args.lr
+    )
+    best_P, best_ll = fitter.fit()
     
     print(f"\nTotal Execution Time: {time.time()-start_time:.2f} seconds")
     print(f"\nBest P (LL={best_ll:.2f}):")
