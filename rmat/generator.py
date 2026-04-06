@@ -12,7 +12,7 @@ PARTITION = "32gb_20core"
 SEED = 42
 
 # K val : Total Run time for one sample (seconds)
-RUN_TIMES = {1:0.01, 2:0.03, 3:0.05, 4:0.22, 5:0.22, 6:0.22, 7:0.22, 8:0.23, 9:0.24, 10:0.24, 11:0.24, 12:0.24, 13:0.24, 14:0.25, 15:0.26, 16:0.29, 17:0.34, 18:0.46, 19:0.79, 20:1.41, 21:2.79, 22:5.61, 23:12.12, 24:26.19, 25:56.52, 26:120.6, 27:265.34, 28:605.03, 29:1468.99}
+RUN_TIMES = {1:0.01, 2:0.03, 3:0.05, 4:0.22, 5:0.22, 6:0.22, 7:0.22, 8:0.23, 9:0.24, 10:0.24, 11:0.24, 12:0.24, 13:0.24, 14:0.25, 15:0.26, 16:0.29, 17:0.34, 18:0.46, 19:0.79, 20:1.41, 21:2.79, 22:5.61, 23:12.12, 24:26.19, 25:56.52, 26:120.6, 27:265.34, 28:605.03, 29:1468.99, 30:3000}
 
 def file_exists(dataset, k, s):
     return os.path.exists(f"{DATA_ROOT}/{dataset}/k{k}_s{s}.txt")
@@ -58,6 +58,24 @@ def create_sbatch(dataset, a, b, c, d, k, samples):
 
 	return sbatch_path
 
+def create_sbatch_single_sample(dataset, a, b, c, d, k, sample):
+	"""Creates one sbatch file for each k value with its 30 samples"""
+	sbatch_path = f"{SBATCH_DIR}/{dataset}_k_{k}_s_{sample}.sbatch"
+	outdir = f"{DATA_ROOT}/{dataset}"
+
+	with open(sbatch_path, "w") as f:
+		tot_exp_time = (RUN_TIMES[k]* 3) + 600 # Buffer time + expected time for the job to run
+		hrs = tot_exp_time // 3600
+		rem_secs = tot_exp_time % 3600
+		mins = rem_secs // 60
+		secs = rem_secs % 60
+		time_string = f"{int(hrs):02}:{int(mins):02}:{int(secs):02}"
+		write_sbatch_header(f, dataset, k, time_string)
+
+		f.write(f"python3 rmat_gen_depth_single.py {a} {b} {c} {d} {k} {sample} {SEED} {outdir}\n")
+
+	return sbatch_path
+
 
 def main():
 	
@@ -81,6 +99,7 @@ def main():
 	runfile = os.path.join(PROJECT_ROOT, "run_all_batches.sh")
 	with open(runfile, "w") as runf:
 		runf.write('#!/bin/bash\n\n')
+		runf.write('echo "No new batches to run."\n')
 
 		# Go line by line inside params file and create batches for diff k values
 		with open(params_file, "r") as pf:
@@ -120,6 +139,14 @@ def main():
 
 					if not missing:
 						print(f"SKIP: {dataset}/k:{k} already complete")
+						continue
+
+					if k > 23:
+						for s in range(1, samples + 1):
+							if not file_exists(dataset, k, s):
+								sbatch_path = create_sbatch_single_sample(dataset, a, b, c, d, k, s)
+								runf.write(f"sbatch {sbatch_path}\n")
+								print(f"[CREATE] {sbatch_path}")
 						continue
 
 					sbatch_path = create_sbatch(dataset, a, b, c, d, k, samples)
