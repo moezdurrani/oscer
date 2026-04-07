@@ -135,7 +135,8 @@ def run_mcmc_numba(steps, n_nodes, n_edges, k, lp00, lp01, lp10, lp11,
 # MAIN PYTORCH CLASS
 # ------------------------------------------------------------------ 
 class mfit:
-    def __init__(self, graph_file_path, init_matrix, iterations, warmup_mcmc, mcmc_per_iter, learning_rate=0.05, device=None):
+    def __init__(self, graph_file_path, init_matrix, iterations, warmup_mcmc, mcmc_per_iter, learning_rate, gpu_synchronize, device=None):
+        init_start_time = time.time() # START INIT TIMER
 
         if device is None:
             self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -143,6 +144,7 @@ class mfit:
             self.device = device
         print(f"Using device: {self.device}")
 
+        self.gpu_synchronize = gpu_synchronize
         self.iterations = iterations
         self.warmup_mcmc = warmup_mcmc
         self.mcmc_per_iter = mcmc_per_iter
@@ -223,6 +225,14 @@ class mfit:
         self.perm = torch.tensor(self.perm_np, dtype=torch.long, device=self.device)
         self.inverse_perm = torch.tensor(self.inv_perm_np, dtype=torch.long, device=self.device)
 
+        # INITIALIZE TIMERS
+        self.time_init = time.time() - init_start_time
+        self.time_warmup_cpu = 0.0
+        self.time_mcmc_cpu = 0.0
+        self.time_sync_pcie = 0.0
+        self.time_grad_gpu = 0.0
+        self.time_opt_gpu = 0.0
+
     def _get_scaled_initial_matrix(self, init_matrix):
         p_np = np.array(init_matrix, dtype=np.float64)
         if self.n_edges > 0:
@@ -289,12 +299,16 @@ class mfit:
         lp00, lp01 = math.log(self.p00.item()), math.log(self.p01.item())
         lp10, lp11 = math.log(self.p10.item()), math.log(self.p11.item())
         
+        # Phase 0: Warm up
+        t0_warmup = time.time()
         accepted_swaps = run_mcmc_numba(
             self.warmup_mcmc, self.n_nodes, self.n_edges, self.k,
             lp00, lp01, lp10, lp11,
             self.perm_np, self.inv_perm_np, self.numba_edge_list,
             self.numba_node_offsets, self.numba_node_edges
         )
+        self.time_warmup_cpu = time.time() - t0_warmup
+
         print(f"Warm-up acceptance rate: {accepted_swaps/(self.warmup_mcmc or 1):.2%}")
 
         print(f"\nMain Optimization ({self.iterations} iterations)")
@@ -308,6 +322,7 @@ class mfit:
         num_chunks = 10
         chunk_size = max(1, self.mcmc_per_iter // num_chunks)
 
+        total_iter_start = time.time()
         for iteration in range(self.iterations):
             iter_start_time = time.time()
             self.optimizer.zero_grad()
@@ -321,26 +336,36 @@ class mfit:
             lp10, lp11 = math.log(self.p10.item()), math.log(self.p11.item())
             
             for chunk in range(num_chunks):
-                # Execute CPU MCMC Exploration
+                # Phase 1: Execute CPU MCMC Exploration
+                t0 = time.time()
                 mcmc_accepted += run_mcmc_numba(
                     chunk_size, self.n_nodes, self.n_edges, self.k,
                     lp00, lp01, lp10, lp11,
                     self.perm_np, self.inv_perm_np, self.numba_edge_list,
                     self.numba_node_offsets, self.numba_node_edges
                 )
+                self.time_mcmc_cpu += time.time() - t0
                 
-                # Sync State to GPU
+                # Phase 2: Sync State to GPU (PCIe DATA TRANSFER)
+                t0 = time.time()
                 self.perm.data.copy_(torch.from_numpy(self.perm_np).to(self.device))
                 self.inverse_perm.data.copy_(torch.from_numpy(self.inv_perm_np).to(self.device))
+                if self.gpu_synchronize and self.device.type == 'cuda': torch.cuda.synchronize()
+                self.time_sync_pcie += time.time() - t0
                 
-                # GPU Analytical Gradient Sample
+                # Phase 3: GPU Analytical Gradient Sample
+                t0 = time.time()
                 ll = self._calc_total_ll()
                 loss = -ll # Minimize Negative Log-Likelihood
                 loss.backward()
+                if self.gpu_synchronize and self.device.type == 'cuda': torch.cuda.synchronize()
+                self.time_grad_gpu += time.time() - t0
                 avg_ll += ll.item()
                 grad_evals += 1
             
+            # Phase 4: GPU Optimizer and Constraints
             # Average accumulated gradients from the chunk ensemble
+            t0 = time.time()
             for param in [self.p00, self.p01, self.p10, self.p11]:
                 if param.grad is not None:
                     param.grad /= grad_evals
@@ -359,12 +384,15 @@ class mfit:
                 for param_group in self.optimizer.param_groups:
                     param_group['lr'] *= 0.98
 
+            if self.gpu_synchronize and self.device.type == 'cuda': torch.cuda.synchronize()
+            self.time_opt_gpu += time.time() - t0
+
             if current_ll > best_ll:
                 best_ll = current_ll
                 best_P = [self.p00.item(), self.p01.item(), self.p10.item(), self.p11.item()]
 
             elapsed = time.time() - iter_start_time
-            
+
             print(
                 f"\n{iteration+1:3d}/{self.iterations}] "
                 f"LL: {current_ll:12.2f}  Best LL: {best_ll:12.2f}  "
@@ -382,10 +410,22 @@ class mfit:
                 f"{self.optimizer.param_groups[3]['lr']:.5f}]"
             )
 
+        total_iter = time.time() - total_iter_start
+        # Profiling data to return
+        profiling_data = {
+            "Init (CPU/GPU)": self.time_init,
+            "Warm-up MCMC (CPU)": self.time_warmup_cpu,
+            "MCMC (CPU)": self.time_mcmc_cpu,
+            "Transfer (PCIe)": self.time_sync_pcie,
+            "Gradient (GPU)": self.time_grad_gpu,
+            "Optimizer (GPU)": self.time_opt_gpu,
+            "Full Iterations": total_iter
+        }
+
         print(f"\nBest P (LL={best_ll:.2f}):")
         print(f"  [{best_P[0]:.4f}, {best_P[1]:.4f}]")
         print(f"  [{best_P[2]:.4f}, {best_P[3]:.4f}]")
-        return best_P, best_ll
+        return best_P, best_ll, profiling_data
 
 def main():
     parser = argparse.ArgumentParser()
@@ -395,6 +435,7 @@ def main():
     parser.add_argument("--lr", type=float, default=0.05)
     parser.add_argument("--warmup_mcmc", type=int, default=10000)
     parser.add_argument("--grad_samples", type=int, default=100000)
+    parser.add_argument("--gpu_synchronize", action="store_true")
     args = parser.parse_args()
     start_time = time.time()
     
@@ -404,11 +445,25 @@ def main():
         iterations=args.iterations, 
         warmup_mcmc=args.warmup_mcmc, 
         mcmc_per_iter=args.grad_samples,
-        learning_rate=args.lr
+        learning_rate=args.lr,
+        gpu_synchronize=args.gpu_synchronize
     )
-    best_P, best_ll = fitter.fit()
-    
-    print(f"\nTotal Execution Time: {time.time()-start_time:.2f} seconds")
+    best_P, best_ll, timings = fitter.fit()
+    total_time = time.time() - start_time
+
+    print(f"\n--- Execution Time Profiling ---")
+    print(f"Total Wall-clock Time: {total_time:.2f} seconds")
+    print(f"  -> Initialization:   {timings['Init (CPU/GPU)']:.2f}s")
+    print(f"  -> CPU Warm-up MCMC: {timings['Warm-up MCMC (CPU)']:.2f}s")
+    print(f"  -> CPU MCMC Search:  {timings['MCMC (CPU)']:.2f}s")
+    print(f"  -> PCIe Transfer:    {timings['Transfer (PCIe)']:.2f}s")
+    print(f"  -> GPU Gradient:     {timings['Gradient (GPU)']:.2f}s")
+    print(f"  -> GPU Optimizer:    {timings['Optimizer (GPU)']:.2f}s")
+
+    # Calculate overhead (printing, python loop logic, etc)
+    measured_time = sum(timings.values())
+    print(f"  -> Script Overhead:  {total_time - measured_time:.2f}s")
+
     print(f"\nBest P (LL={best_ll:.2f}):")
     print(f"  [{best_P[0]:.4f}, {best_P[1]:.4f}]")
     print(f"  [{best_P[2]:.4f}, {best_P[3]:.4f}]")
