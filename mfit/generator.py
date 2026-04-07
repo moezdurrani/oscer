@@ -6,11 +6,20 @@ EXPERIMENT_ROOT = "/ourdisk/hpc/soonerhpclab/dont_archive/moezdurrani/experiment
 PROJECT_ROOT = os.path.expanduser("~/mfit")
 SBATCH_DIR = os.path.join(PROJECT_ROOT, "sbatches")
 LOG_DIR = os.path.join(PROJECT_ROOT, "logs")
-PARTITION = "sooner_gpu_test"
+PARTITION = "sooner_gpu_test_ai"
 LOW_K_THRESHOLD, HIGH_K_THRESHOLD = 15, 21
 
 # Run times (seconds) for kronfit per k values
-RUN_TIMES = {1:15, 2:20, 3:24, 4:35, 5:40, 6:40, 7:45, 8:50, 9:55, 10:60, 11:70, 12:110, 13:140, 14:250, 15:300, 16:300, 17:430, 18:750, 19:1200 20:2000, 21:3000, 22:3500, 23:4000}
+RUN_TIMES = {1:15, 2:20, 3:24, 4:35, 5:40, 6:40, 7:45, 8:50, 9:55, 10:60, 11:70, 12:110, 13:140, 14:250, 15:300, 16:300, 17:430, 18:750, 19:1200, 20:2000, 21:3000, 22:3500, 23:4000, 24:8000}
+
+def get_mem_for_k(k):
+    if k <= 20:   return "32G"
+    elif k <= 22: return "64G"
+    elif k <= 23: return "128G"
+    elif k <= 24: return "200G"
+    elif k <= 25: return "350G"
+    else:         return "450G"
+
 
 def write_sbatch_header(f, dataset, k, k_start, k_end, sample):
     f.write("#!/bin/bash\n")
@@ -37,8 +46,9 @@ def write_sbatch_header(f, dataset, k, k_start, k_end, sample):
     remaining.append("#SBATCH --mail-type=END,FAIL\n")
     remaining.append(f"#SBATCH --chdir={PROJECT_ROOT}\n")
     remaining.append("#SBATCH --gres=gpu:H100:1\n")
+    remaining.append("#SBATCH --nodelist=c1041\n")  # the H100 node
     remaining.append("#SBATCH --cpus-per-task=12\n")
-    remaining.append("#SBATCH --mem=128G\n")
+    remaining.append(f"#SBATCH --mem={get_mem_for_k(k)}\n")
     # remaining.append("module load GCC/13.3.0\n")
     remaining.append("module load CUDA/12.1.1\n")
     remaining.append("module load Python/3.10.4-GCCcore-11.3.0\n")
@@ -107,7 +117,11 @@ def specific(k_start, k_end, samples, dataset, runf):
                 tot_exp_time = 0
             for s in range(1, samples+1):
                 data_name, exp_name = f"k{k}_s{s}.txt", f"k{k}_s{s}.json"
+                data_path = f"{data_dir}/{data_name}"
                 if data_name in existing_data and exp_name not in existing_experiments:
+                    if os.path.getsize(data_path) == 0:
+                        print(f"Skipping empty file: {data_path}")
+                        continue
                     tot_exp_time += RUN_TIMES[k]
                     remaining.append(f"python3 {PROJECT_ROOT}/run.py {data_dir}/{data_name} {experiments_dir}/{exp_name}\n")
                 
@@ -122,7 +136,11 @@ def specific(k_start, k_end, samples, dataset, runf):
             tot_exp_time = 0
             for s in range(1, samples+1):
                 data_name, exp_name = f"k{k}_s{s}.txt", f"k{k}_s{s}.json"
+                data_path = f"{data_dir}/{data_name}"
                 if data_name in existing_data and exp_name not in existing_experiments:
+                    if os.path.getsize(data_path) == 0:
+                        print(f"Skipping empty file: {data_path}")
+                        continue
                     tot_exp_time += RUN_TIMES[k]
                     remaining.append(f"python3 {PROJECT_ROOT}/run.py {data_dir}/{data_name} {experiments_dir}/{exp_name}\n")
             write_remaining_header(tot_exp_time, remaining, sb_write)
@@ -138,7 +156,11 @@ def specific(k_start, k_end, samples, dataset, runf):
                 sbatch_created = False
             for s in range(1, samples+1):
                 data_name, exp_name = f"k{k}_s{s}.txt", f"k{k}_s{s}.json"
+                data_path = f"{data_dir}/{data_name}"
                 if data_name in existing_data and exp_name not in existing_experiments:
+                    if os.path.getsize(data_path) == 0:
+                        print(f"Skipping empty file: {data_path}")
+                        continue
                     sbatch_path, sb_write, remaining = create_sbatch(k, dataset, k_start, k_end, s)
                     tot_exp_time = RUN_TIMES[k]
                     remaining.append(f"python3 {PROJECT_ROOT}/run.py {data_dir}/{data_name} {experiments_dir}/{exp_name}\n")

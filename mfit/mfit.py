@@ -135,7 +135,7 @@ def run_mcmc_numba(steps, n_nodes, n_edges, k, lp00, lp01, lp10, lp11,
 # MAIN PYTORCH CLASS
 # ------------------------------------------------------------------ 
 class mfit:
-    def __init__(self, graph_file_path, init_matrix, iterations, warmup_mcmc, mcmc_per_iter, learning_rate, gpu_synchronize, device=None):
+    def __init__(self, graph_file_path, init_matrix, iterations, warmup_mcmc, mcmc_per_iter, learning_rate, optimizer_name, gpu_synchronize, device=None):
         init_start_time = time.time() # START INIT TIMER
 
         if device is None:
@@ -143,6 +143,8 @@ class mfit:
         else:
             self.device = device
         print(f"Using device: {self.device}")
+
+        print(f"Optimizer: {optimizer_name}")
 
         self.gpu_synchronize = gpu_synchronize
         self.iterations = iterations
@@ -207,12 +209,19 @@ class mfit:
         
         # Initialize Adam optimizer with reactive betas (0.5, 0.9) to 
         # prevent momentum from being poisoned by early, noisy MCMC steps
-        self.optimizer = torch.optim.Adam([
+        params = [
             {'params': self.p00, 'lr': learning_rate},
             {'params': self.p01, 'lr': learning_rate},
             {'params': self.p10, 'lr': learning_rate},
             {'params': self.p11, 'lr': learning_rate},
-        ], betas=(0.5, 0.9))
+        ]
+
+        if optimizer_name == "adam":
+            self.optimizer = torch.optim.Adam(params, betas=(0.5, 0.9))
+        elif optimizer_name == "adamw":
+            self.optimizer = torch.optim.AdamW(params, betas=(0.5, 0.9), weight_decay=0.01)
+        elif optimizer_name == "rmsprop":
+            self.optimizer = torch.optim.RMSprop(params, alpha=0.99, momentum=0.0)
 
         degrees = dict(self.graph.degree())
         sorted_nodes = sorted(degrees, key=degrees.get, reverse=True)
@@ -436,6 +445,8 @@ def main():
     parser.add_argument("--lr", type=float, default=0.05)
     parser.add_argument("--warmup_mcmc", type=int, default=10000)
     parser.add_argument("--grad_samples", type=int, default=100000)
+    parser.add_argument("--optimizer", type=str, default="adam", 
+                    choices=["adam", "adamw", "rmsprop"])
     parser.add_argument("--gpu_synchronize", action="store_true")
     args = parser.parse_args()
     start_time = time.time()
@@ -447,6 +458,7 @@ def main():
         warmup_mcmc=args.warmup_mcmc, 
         mcmc_per_iter=args.grad_samples,
         learning_rate=args.lr,
+        optimizer_name=args.optimizer,
         gpu_synchronize=args.gpu_synchronize
     )
     best_P, best_ll, timings = model.fit()
