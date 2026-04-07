@@ -16,12 +16,13 @@ def main():
     # Strictly following the hyperparams from your kronfit command line
     # grad_samples in SNAP is usually 100,000, we mimic the step logic here
     model = mfit(
-        graph_temp=G, 
+        graph_temp=args.data_path, 
         init_matrix=[0.9, 0.7, 0.5, 0.2], 
+        iterations=100,
         learning_rate=1e-5, # Default LrnRate from kronfit.cpp
         warmup_mcmc=10000, 
         grad_samples=100000, 
-        iterations=100
+        
     )
 
     results = model.fit()

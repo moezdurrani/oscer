@@ -413,13 +413,13 @@ class mfit:
         total_iter = time.time() - total_iter_start
         # Profiling data to return
         profiling_data = {
-            "Init (CPU/GPU)": self.time_init,
-            "Warm-up MCMC (CPU)": self.time_warmup_cpu,
-            "MCMC (CPU)": self.time_mcmc_cpu,
-            "Transfer (PCIe)": self.time_sync_pcie,
-            "Gradient (GPU)": self.time_grad_gpu,
-            "Optimizer (GPU)": self.time_opt_gpu,
-            "Full Iterations": total_iter
+            "init_cpu_gpu": self.time_init,
+            "warm_up_mcmc_cpu": self.time_warmup_cpu,
+            "mcmc_cpu": self.time_mcmc_cpu,
+            "transfer_pcie": self.time_sync_pcie,
+            "gradient_gpu": self.time_grad_gpu,
+            "optimizer_gpu": self.time_opt_gpu,
+            "full_iterations": total_iter
         }
 
         print(f"\nBest P (LL={best_ll:.2f}):")
@@ -453,16 +453,13 @@ def main():
 
     print(f"\n--- Execution Time Profiling ---")
     print(f"Total Wall-clock Time: {total_time:.2f} seconds")
-    print(f"  -> Initialization:   {timings['Init (CPU/GPU)']:.2f}s")
-    print(f"  -> CPU Warm-up MCMC: {timings['Warm-up MCMC (CPU)']:.2f}s")
-    print(f"  -> CPU MCMC Search:  {timings['MCMC (CPU)']:.2f}s")
-    print(f"  -> PCIe Transfer:    {timings['Transfer (PCIe)']:.2f}s")
-    print(f"  -> GPU Gradient:     {timings['Gradient (GPU)']:.2f}s")
-    print(f"  -> GPU Optimizer:    {timings['Optimizer (GPU)']:.2f}s")
-
-    # Calculate overhead (printing, python loop logic, etc)
-    measured_time = sum(timings.values())
-    print(f"  -> Script Overhead:  {total_time - measured_time:.2f}s")
+    print(f"  -> Initialization:   {timings['init_cpu_gpu']:.2f}s")
+    print(f"  -> CPU Warm-up MCMC: {timings['warm_up_mcmc_cpu']:.2f}s")
+    print(f"  -> CPU MCMC Search:  {timings['mcmc_cpu']:.2f}s")
+    print(f"  -> PCIe Transfer:    {timings['transfer_pcie']:.2f}s")
+    print(f"  -> GPU Gradient:     {timings['gradient_gpu']:.2f}s")
+    print(f"  -> GPU Optimizer:    {timings['optimizer_gpu']:.2f}s")
+    # print(f"  -> Total Iterations Time:    {timings['full_iterations']:.2f}s")
 
     print(f"\nBest P (LL={best_ll:.2f}):")
     print(f"  [{best_P[0]:.4f}, {best_P[1]:.4f}]")
