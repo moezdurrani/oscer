@@ -226,12 +226,12 @@ class mfit:
         self.inverse_perm = torch.tensor(self.inv_perm_np, dtype=torch.long, device=self.device)
 
         # INITIALIZE TIMERS
-        self.time_init = time.time() - init_start_time
         self.time_warmup_cpu = 0.0
         self.time_mcmc_cpu = 0.0
         self.time_sync_pcie = 0.0
         self.time_grad_gpu = 0.0
         self.time_opt_gpu = 0.0
+        self.time_init = time.time() - init_start_time
 
     def _get_scaled_initial_matrix(self, init_matrix):
         p_np = np.array(init_matrix, dtype=np.float64)
@@ -293,6 +293,7 @@ class mfit:
         return ll_empty + torch.sum(ll_edges_actual - ll_edges_fake_no_edge)
 
     def fit(self):
+        fit_start = time.time()
         print(f"\nMCMC Numba Warm-up ({self.warmup_mcmc} steps)")
         
         # Pre-calculate logarithms to pass into Numba
@@ -322,7 +323,6 @@ class mfit:
         num_chunks = 10
         chunk_size = max(1, self.mcmc_per_iter // num_chunks)
 
-        total_iter_start = time.time()
         for iteration in range(self.iterations):
             iter_start_time = time.time()
             self.optimizer.zero_grad()
@@ -410,7 +410,11 @@ class mfit:
                 f"{self.optimizer.param_groups[3]['lr']:.5f}]"
             )
 
-        total_iter = time.time() - total_iter_start
+        print(f"\nBest P (LL={best_ll:.2f}):")
+        print(f"  [{best_P[0]:.4f}, {best_P[1]:.4f}]")
+        print(f"  [{best_P[2]:.4f}, {best_P[3]:.4f}]")
+
+        full_fit = time.time() - fit_start
         # Profiling data to return
         profiling_data = {
             "init_cpu_gpu": self.time_init,
@@ -419,12 +423,9 @@ class mfit:
             "transfer_pcie": self.time_sync_pcie,
             "gradient_gpu": self.time_grad_gpu,
             "optimizer_gpu": self.time_opt_gpu,
-            "full_iterations": total_iter
+            "full_fit": full_fit
         }
 
-        print(f"\nBest P (LL={best_ll:.2f}):")
-        print(f"  [{best_P[0]:.4f}, {best_P[1]:.4f}]")
-        print(f"  [{best_P[2]:.4f}, {best_P[3]:.4f}]")
         return best_P, best_ll, profiling_data
 
 def main():
@@ -439,7 +440,7 @@ def main():
     args = parser.parse_args()
     start_time = time.time()
     
-    fitter = mfit(
+    model = mfit(
         graph_file_path=args.file_path, 
         init_matrix=args.init_matrix, 
         iterations=args.iterations, 
@@ -448,7 +449,7 @@ def main():
         learning_rate=args.lr,
         gpu_synchronize=args.gpu_synchronize
     )
-    best_P, best_ll, timings = fitter.fit()
+    best_P, best_ll, timings = model.fit()
     total_time = time.time() - start_time
 
     print(f"\n--- Execution Time Profiling ---")
@@ -459,7 +460,7 @@ def main():
     print(f"  -> PCIe Transfer:    {timings['transfer_pcie']:.2f}s")
     print(f"  -> GPU Gradient:     {timings['gradient_gpu']:.2f}s")
     print(f"  -> GPU Optimizer:    {timings['optimizer_gpu']:.2f}s")
-    # print(f"  -> Total Iterations Time:    {timings['full_iterations']:.2f}s")
+    print(f"\n  -> Total Fit Time:    {timings['full_fit']+timings['init_cpu_gpu']:.2f}s")
 
     print(f"\nBest P (LL={best_ll:.2f}):")
     print(f"  [{best_P[0]:.4f}, {best_P[1]:.4f}]")
