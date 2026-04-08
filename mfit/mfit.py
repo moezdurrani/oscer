@@ -7,15 +7,6 @@ import time
 from tqdm import trange
 from numba import njit
 
-try:
-    from fast_sampler import sample_non_edges_directed_numba, sample_non_edges_undirected_numba
-    print("Successfully imported Numba fast sampling")
-    USE_FAST_SAMPLING = True
-except ImportError:
-    print("Numba or fast_sampler.py not available. Using pure Python sampling.")
-    USE_FAST_SAMPLING = False
-
-
 # NUMBA C-SPEED MCMC ENGINE (LOG-SPACE OPTIMIZED)
 # ------------------------------------------------------------------
 @njit(fastmath=True)
@@ -50,20 +41,23 @@ def run_mcmc_numba(steps, n_nodes, n_edges, k, lp00, lp01, lp10, lp11,
     Uses a CSR-style flat array (node_offsets, node_edges) for O(1) adjacency lookups
     without the memory bloat of dense padded tensors.
     """
+
+    # perm : slot → node mapping (current permutation)
+    # inv_perm : node → slot mapping (inverse permutation for O(1) lookups
     accepted = 0
     for step in range(steps):
         # 1. Propose Swap (20% Random Node, 80% Random Edge)
         if np.random.rand() < 0.2:
             i = np.random.randint(0, n_nodes)
             j = np.random.randint(0, n_nodes)
-            if i == j: continue
+            if i == j: continue # same node, no change
             pi = perm[i]
             pj = perm[j]
         else:
             e_idx = np.random.randint(0, n_edges)
             pi = edge_list[e_idx, 0]
             pj = edge_list[e_idx, 1]
-            if pi == pj: continue
+            if pi == pj: continue # self loops don't affect likelihood
             i = inv_perm[pi]
             j = inv_perm[pj]
 

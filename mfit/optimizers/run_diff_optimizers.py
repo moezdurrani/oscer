@@ -2,6 +2,7 @@ import os
 import json
 import time
 import sys
+import argparse
 
 sys.path.append(os.path.abspath(".."))
 from mfit import mfit
@@ -61,6 +62,33 @@ def run_single(file_path, optimizer, output_path):
 
 
 def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--k_start",
+        type=int,
+        required=True,
+        help="Starting value of k"
+    )
+    parser.add_argument(
+        "--k_end",
+        type=int,
+        required=True,
+        help="Ending value of k (inclusive)"
+    )
+    parser.add_argument(
+        "--optimizer",
+        type=str,
+        required=True,
+        choices=["adam", "adamw", "rmsprop"],
+        help="Optimizer to use"
+    )
+    args = parser.parse_args()
+
+    optimizer = args.optimizer
+    k_start = args.k_start
+    k_end = args.k_end
+
+
     for dataset in DATASETS:
         print(f"\n========== DATASET: {dataset} ==========")
 
@@ -69,15 +97,11 @@ def main():
 
         os.makedirs(dataset_exp_path, exist_ok=True)
 
-        # create optimizer subfolders
-        optimizer_paths = {}
-        for opt in OPTIMIZERS:
-            opt_path = os.path.join(dataset_exp_path, opt)
-            os.makedirs(opt_path, exist_ok=True)
-            optimizer_paths[opt] = opt_path
+        opt_path = os.path.join(dataset_exp_path, optimizer)
+        os.makedirs(opt_path, exist_ok=True)
 
         # loop over k and s
-        for k in range(1, 23):
+        for k in range(k_start, k_end+1):
             for s in range(1, 31):
 
                 filename = f"k{k}_s{s}.txt"
@@ -86,19 +110,18 @@ def main():
                 if not os.path.exists(file_path):
                     continue
 
-                for optimizer in OPTIMIZERS:
-                    json_name = f"k{k}_s{s}.json"
-                    json_path = os.path.join(optimizer_paths[optimizer], json_name)
+                json_name = f"k{k}_s{s}.json"
+                json_path = os.path.join(opt_path, json_name)
 
-                    # skip if already exists
-                    if os.path.exists(json_path):
-                        print(f"Skipping (exists): {json_path}")
-                        continue
+                # skip if already exists
+                if os.path.exists(json_path):
+                    print(f"Skipping (exists): {json_path}")
+                    continue
 
-                    try:
-                        run_single(file_path, optimizer, json_path)
-                    except Exception as e:
-                        print(f"Error on {filename} ({optimizer}): {e}")
+                try:
+                    run_single(file_path, optimizer, json_path)
+                except Exception as e:
+                    print(f"Error on {filename} ({optimizer}): {e}")
 
 
 if __name__ == "__main__":
