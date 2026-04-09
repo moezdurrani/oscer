@@ -129,7 +129,7 @@ def run_mcmc_numba(steps, n_nodes, n_edges, k, lp00, lp01, lp10, lp11,
 # MAIN PYTORCH CLASS
 # ------------------------------------------------------------------ 
 class mfit:
-    def __init__(self, graph_file_path, init_matrix, iterations, warmup_mcmc, mcmc_per_iter, learning_rate, optimizer_name, gpu_synchronize, device=None):
+    def __init__(self, graph_file_path, init_matrix, iterations, warmup_mcmc, mcmc_per_iter, learning_rate, optimizer_name, gpu_synchronize, mode, device=None):
         init_start_time = time.time() # START INIT TIMER
 
         if device is None:
@@ -137,8 +137,20 @@ class mfit:
         else:
             self.device = device
         print(f"Using device: {self.device}")
-
         print(f"Optimizer: {optimizer_name}")
+
+        # Determine Dtypes based on mode
+        if mode == "baseline":
+            idx_dtype = torch.int64
+            math_dtype = torch.float32
+        elif mode == "economy":
+            idx_dtype = torch.int32 # The "Free Win" 50% storage reduction starts here
+            math_dtype = torch.float32
+        elif mode == "stress":
+            idx_dtype = torch.int32
+            math_dtype = torch.float16 # The "Breaking Point"
+        
+        self.math_dtype = math_dtype # Store for use in LL calc
 
         self.gpu_synchronize = gpu_synchronize
         self.iterations = iterations
@@ -172,7 +184,7 @@ class mfit:
         
         self.n_edges = self.graph.number_of_edges()
         
-        self.edge_list_tensor = torch.tensor(list(self.graph.edges()), dtype=torch.long, device=self.device)
+        self.edge_list_tensor = torch.tensor(list(self.graph.edges()), dtype=idx_dtype, device=self.device)
         self.node_to_edges = {n: [] for n in range(self.n_nodes)}
         for idx, (u, v) in enumerate(self.edge_list_tensor.tolist()):
             self.node_to_edges[u].append(idx)
@@ -196,10 +208,10 @@ class mfit:
         print("Initial initiator matrix (scaled):\n", scaled_p_np)
         
         # Initialize pytorch parametersdirectly in Probability Space (0, 1) instead of Logits
-        self.p00 = torch.nn.Parameter(torch.tensor(scaled_p_np[0, 0], dtype=torch.float32, device=self.device))
-        self.p01 = torch.nn.Parameter(torch.tensor(scaled_p_np[0, 1], dtype=torch.float32, device=self.device))
-        self.p10 = torch.nn.Parameter(torch.tensor(scaled_p_np[1, 0], dtype=torch.float32, device=self.device))
-        self.p11 = torch.nn.Parameter(torch.tensor(scaled_p_np[1, 1], dtype=torch.float32, device=self.device))
+        self.p00 = torch.nn.Parameter(torch.tensor(scaled_p_np[0, 0], dtype=math_dtype, device=self.device))
+        self.p01 = torch.nn.Parameter(torch.tensor(scaled_p_np[0, 1], dtype=math_dtype, device=self.device))
+        self.p10 = torch.nn.Parameter(torch.tensor(scaled_p_np[1, 0], dtype=math_dtype, device=self.device))
+        self.p11 = torch.nn.Parameter(torch.tensor(scaled_p_np[1, 1], dtype=math_dtype, device=self.device))
         
         # Initialize Adam optimizer with reactive betas (0.5, 0.9) to 
         # prevent momentum from being poisoned by early, noisy MCMC steps
@@ -225,8 +237,8 @@ class mfit:
         inv[self.perm_np] = np.arange(self.n_nodes, dtype=np.int32)
         self.inv_perm_np = inv
 
-        self.perm = torch.tensor(self.perm_np, dtype=torch.long, device=self.device)
-        self.inverse_perm = torch.tensor(self.inv_perm_np, dtype=torch.long, device=self.device)
+        self.perm = torch.tensor(self.perm_np, dtype=idx_dtype, device=self.device)
+        self.inverse_perm = torch.tensor(self.inv_perm_np, dtype=idx_dtype, device=self.device)
 
         # INITIALIZE TIMERS
         self.time_warmup_cpu = 0.0
@@ -351,8 +363,8 @@ class mfit:
                 
                 # Phase 2: Sync State to GPU (PCIe DATA TRANSFER)
                 t0 = time.time()
-                self.perm.data.copy_(torch.from_numpy(self.perm_np).to(self.device))
-                self.inverse_perm.data.copy_(torch.from_numpy(self.inv_perm_np).to(self.device))
+                self.perm.data.copy_(torch.from_numpy(self.perm_np).to(self.device, dtype=self.perm.dtype))
+                self.inverse_perm.data.copy_(torch.from_numpy(self.inv_perm_np).to(self.device, dtype=self.inverse_perm.dtype))
                 if self.gpu_synchronize and self.device.type == 'cuda': torch.cuda.synchronize()
                 self.time_sync_pcie += time.time() - t0
                 
@@ -379,10 +391,11 @@ class mfit:
             # Bound parameters to strict probability space and apply gentle 
             # learning rate decay to ensure fine-tuning convergence
             with torch.no_grad():
-                self.p00.clamp_(1e-4, 0.9999)
-                self.p01.clamp_(1e-4, 0.9999)
-                self.p10.clamp_(1e-4, 0.9999)
-                self.p11.clamp_(1e-4, 0.9999)
+                upper_bound = 0.999 if self.math_dtype == torch.float16 else 0.9999
+                self.p00.clamp_(1e-4, upper_bound)
+                self.p01.clamp_(1e-4, upper_bound)
+                self.p10.clamp_(1e-4, upper_bound)
+                self.p11.clamp_(1e-4, upper_bound)
                 
                 for param_group in self.optimizer.param_groups:
                     param_group['lr'] *= 0.98
@@ -428,6 +441,11 @@ class mfit:
             "optimizer_gpu": self.time_opt_gpu,
             "full_fit": full_fit
         }
+        # Add to profiling_data before return in fit()
+        if self.device.type == 'cuda':
+            profiling_data["peak_vram_mb"] = torch.cuda.max_memory_allocated(self.device) / 1024**2
+        else:
+            profiling_data["peak_vram_mb"] = 0.0
 
         return best_P, best_ll, profiling_data
 
@@ -441,6 +459,9 @@ def main():
     parser.add_argument("--grad_samples", type=int, default=100000)
     parser.add_argument("--optimizer", type=str, default="adam", 
                     choices=["adam", "adamw", "rmsprop"])
+    parser.add_argument("--mode", type=str, default="baseline", 
+                    choices=["baseline", "economy", "stress"],
+                    help="baseline: Exp 1, economy: Exp 2 (int32), stress: Exp 3 (float16)")                
     parser.add_argument("--gpu_synchronize", action="store_true")
     args = parser.parse_args()
     start_time = time.time()
@@ -453,6 +474,7 @@ def main():
         mcmc_per_iter=args.grad_samples,
         learning_rate=args.lr,
         optimizer_name=args.optimizer,
+        mode=args.mode,
         gpu_synchronize=args.gpu_synchronize
     )
     best_P, best_ll, timings = model.fit()
@@ -466,6 +488,7 @@ def main():
     print(f"  -> PCIe Transfer:    {timings['transfer_pcie']:.2f}s")
     print(f"  -> GPU Gradient:     {timings['gradient_gpu']:.2f}s")
     print(f"  -> GPU Optimizer:    {timings['optimizer_gpu']:.2f}s")
+    print(f"  -> Peak VRAM:        {timings['peak_vram_mb']:.9f} MB")
     print(f"\n  -> Total Fit Time:    {timings['full_fit']+timings['init_cpu_gpu']:.2f}s")
 
     print(f"\nBest P (LL={best_ll:.2f}):")

@@ -1,6 +1,7 @@
 k_start ?= 1
 k_end   ?= 23
-samples ?= 30
+s_start ?= 1
+s_end ?= 15
 
 # Optional: run only one dataset, example: make run dataset=my_dataset
 dataset ?=
@@ -20,9 +21,9 @@ prepare_dirs:
 
 generate_batches:
 ifeq ($(strip $(dataset)),)
-	python3 generator.py $(k_start) $(k_end) $(samples)
+	python3 generator.py $(k_start) $(k_end) $(s_start) $(s_end)
 else
-	python3 generator.py $(k_start) $(k_end) $(samples) --dataset $(dataset)
+	python3 generator.py $(k_start) $(k_end) $(s_start) $(s_end) --dataset $(dataset)
 endif
 	chmod +x run_all_batches.sh
 

@@ -93,7 +93,7 @@ def create_sbatch(k,dataset, k_start, k_end, sample):
     remaining = write_sbatch_header(sb_write, dataset, k, k_start, k_end, sample)    
     return sbatch_path, sb_write, remaining
 
-def specific(k_start, k_end, samples, dataset, runf):
+def specific(k_start, k_end, s_start, s_end, dataset, runf):
     data_dir = os.path.join(DATA_ROOT, dataset)
     if not os.path.isdir(data_dir):
         return
@@ -115,7 +115,7 @@ def specific(k_start, k_end, samples, dataset, runf):
                 sbatch_path, sb_write, remaining = create_sbatch(k, dataset, k_start, k_end, sample=-1)
                 sbatch_created = True
                 tot_exp_time = 0
-            for s in range(1, samples+1):
+            for s in range(s_start, s_end+1):
                 data_name, exp_name = f"k{k}_s{s}.txt", f"k{k}_s{s}.json"
                 data_path = f"{data_dir}/{data_name}"
                 if data_name in existing_data and exp_name not in existing_experiments:
@@ -134,7 +134,7 @@ def specific(k_start, k_end, samples, dataset, runf):
                 sbatch_created = False
             sbatch_path, sb_write, remaining = create_sbatch(k, dataset, k_start, k_end, sample=-1)
             tot_exp_time = 0
-            for s in range(1, samples+1):
+            for s in range(s_start, s_end+1):
                 data_name, exp_name = f"k{k}_s{s}.txt", f"k{k}_s{s}.json"
                 data_path = f"{data_dir}/{data_name}"
                 if data_name in existing_data and exp_name not in existing_experiments:
@@ -154,7 +154,7 @@ def specific(k_start, k_end, samples, dataset, runf):
                 sb_write.close()
                 runf.write(f"sbatch {sbatch_path}\n")
                 sbatch_created = False
-            for s in range(1, samples+1):
+            for s in range(s_start, s_end+1):
                 data_name, exp_name = f"k{k}_s{s}.txt", f"k{k}_s{s}.json"
                 data_path = f"{data_dir}/{data_name}"
                 if data_name in existing_data and exp_name not in existing_experiments:
@@ -175,15 +175,16 @@ def specific(k_start, k_end, samples, dataset, runf):
 
             
 
-def parent(k_start, k_end, samples, runf):
+def parent(k_start, k_end, s_start, s_end, runf):
     for dataset in sorted(os.listdir(DATA_ROOT)):
-        specific(k_start, k_end, samples, dataset, runf)
+        specific(k_start, k_end, s_start, s_end, dataset, runf)
 
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("k_start", type=int, help="Start value of K")
     parser.add_argument("k_end", type=int, help="End value of K")
-    parser.add_argument("samples", type=int, help="Number of samples per k value")
+    parser.add_argument("s_start", type=int, help="Starting sample index")
+    parser.add_argument("s_end", type=int, help="Ending sample index")
     parser.add_argument("--dataset", type=str, help="Specific dataset to run Kronfit on")
     args = parser.parse_args()
 
@@ -198,9 +199,9 @@ def main():
 
         if args.dataset:
             dataset = args.dataset
-            specific(args.k_start, args.k_end, args.samples, args.dataset, runf)
+            specific(args.k_start, args.k_end, args.s_start, args.s_end, args.dataset, runf)
         else:
-            parent(args.k_start, args.k_end, args.samples, runf)
+            parent(args.k_start, args.k_end, args.s_start, args.s_end, runf)
     print("Sbatch file generation complete")
 
 if __name__ == "__main__":

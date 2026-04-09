@@ -76,20 +76,44 @@ def main():
         help="Ending value of k (inclusive)"
     )
     parser.add_argument(
+        "--s_start",
+        type=int,
+        required=True,
+        help="Starting value of s"
+    )
+    parser.add_argument(
+        "--s_end",
+        type=int,
+        required=True,
+        help="Ending value of s (inclusive)"
+    )
+    parser.add_argument(
         "--optimizer",
         type=str,
         required=True,
         choices=["adam", "adamw", "rmsprop"],
         help="Optimizer to use"
     )
+    parser.add_argument(
+    "--dataset",
+    type=str,
+    required=False,
+    choices=DATASETS,
+    help="Dataset to use"
+    )
     args = parser.parse_args()
 
     optimizer = args.optimizer
     k_start = args.k_start
     k_end = args.k_end
+    s_start = args.s_start
+    s_end = args.s_end
+    d = args.dataset
 
 
     for dataset in DATASETS:
+        if d and dataset != d:
+            continue
         print(f"\n========== DATASET: {dataset} ==========")
 
         dataset_data_path = os.path.join(DATA_DIR, dataset)
@@ -102,7 +126,7 @@ def main():
 
         # loop over k and s
         for k in range(k_start, k_end+1):
-            for s in range(1, 31):
+            for s in range(s_start, s_end+1):
 
                 filename = f"k{k}_s{s}.txt"
                 file_path = os.path.join(dataset_data_path, filename)
