@@ -5,6 +5,8 @@ import numpy as np
 import math
 import time
 from tqdm import trange
+import os
+import numba
 from numba import njit
 
 # NUMBA C-SPEED MCMC ENGINE (LOG-SPACE OPTIMIZED)
@@ -129,13 +131,20 @@ def run_mcmc_numba(steps, n_nodes, n_edges, k, lp00, lp01, lp10, lp11,
 # MAIN PYTORCH CLASS
 # ------------------------------------------------------------------ 
 class mfit:
-    def __init__(self, graph_file_path, init_matrix, iterations, warmup_mcmc, mcmc_per_iter, learning_rate, optimizer_name, gpu_synchronize, mode, device=None):
+    def __init__(self, graph_file_path, init_matrix, iterations, warmup_mcmc, mcmc_per_iter, learning_rate, optimizer_name, gpu_synchronize, mode, n_threads, device=None):
         init_start_time = time.time() # START INIT TIMER
 
         if device is None:
             self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         else:
             self.device = device
+
+        if n_threads and n_threads > 0:
+            self.device = torch.device("cpu")
+            torch.set_num_threads(n_threads)
+            numba.set_num_threads(n_threads)
+            print(f"--- Threading initialized with {n_threads} threads ---")
+
         print(f"Using device: {self.device}")
         print(f"Optimizer: {optimizer_name}")
 
@@ -458,10 +467,12 @@ def main():
     parser.add_argument("--warmup_mcmc", type=int, default=10000)
     parser.add_argument("--grad_samples", type=int, default=100000)
     parser.add_argument("--optimizer", type=str, default="adam", 
-                    choices=["adam", "adamw", "rmsprop"])
+        choices=["adam", "adamw", "rmsprop"])
     parser.add_argument("--mode", type=str, default="baseline", 
-                    choices=["baseline", "economy", "stress"],
-                    help="baseline: Exp 1, economy: Exp 2 (int32), stress: Exp 3 (float16)")                
+        choices=["baseline", "economy", "stress"],
+        help="baseline: Exp 1, economy: Exp 2 (int32), stress: Exp 3 (float16)")
+    parser.add_argument("--n_threads", type=int, default=None, 
+        help="Number of threads to run the code on")                 
     parser.add_argument("--gpu_synchronize", action="store_true")
     args = parser.parse_args()
     start_time = time.time()
@@ -475,6 +486,7 @@ def main():
         learning_rate=args.lr,
         optimizer_name=args.optimizer,
         mode=args.mode,
+        n_threads=args.n_threads,
         gpu_synchronize=args.gpu_synchronize
     )
     best_P, best_ll, timings = model.fit()

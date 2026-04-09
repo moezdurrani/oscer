@@ -1,0 +1,160 @@
+import os
+import json
+import time
+import sys
+import argparse
+
+sys.path.append(os.path.abspath("../.."))
+from mfit import mfit
+
+# -------- PATHS -------- #
+DATA_DIR = "../../../data"
+EXP_DIR = "./experiments"
+# ----------------------- #
+
+INIT_MATRIX = [0.9, 0.7, 0.5, 0.2]
+ITERATIONS = 100
+LR = 0.05
+WARMUP = 10000
+GRAD_SAMPLES = 100000
+VALID_THREADS = [1, 2, 4, 8, 16]
+
+def run_single(file_path, optimizer, output_path, mode, n_threads):
+    print(f"\nRunning {optimizer} on {file_path}")
+
+    start_time = time.time()
+
+    model = mfit(
+        graph_file_path=file_path,
+        init_matrix=INIT_MATRIX,
+        iterations=ITERATIONS,
+        warmup_mcmc=WARMUP,
+        mcmc_per_iter=GRAD_SAMPLES,
+        learning_rate=LR,
+        optimizer_name=optimizer,
+        mode=mode,
+        n_threads=n_threads,
+        gpu_synchronize=False
+    )
+
+    best_P, best_ll, profiling_data = model.fit()
+
+    total_time = time.time() - start_time
+
+    output_data = {
+        "best_parameters": {
+            "P00": best_P[0],
+            "P01": best_P[1],
+            "P10": best_P[2],
+            "P11": best_P[3]
+        },
+        "best_log_likelihood": best_ll,
+        "total_time_seconds": total_time,
+        "profiling_timings_seconds": profiling_data
+    }
+
+    with open(output_path, "w") as f:
+        json.dump(output_data, f, indent=4)
+
+    print(f"Saved → {output_path}")
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--k_start",
+        type=int,
+        required=True,
+        help="Starting value of k"
+    )
+    parser.add_argument(
+        "--k_end",
+        type=int,
+        default=None,
+        required=False,
+        help="Ending value of k (inclusive)"
+    )
+    parser.add_argument(
+        "--s_start",
+        type=int,
+        default=1,
+        required=False,
+        help="Starting value of s"
+    )
+    parser.add_argument(
+        "--s_end",
+        type=int,
+        default=3,
+        required=False,
+        help="Ending value of s (inclusive)"
+    )
+    parser.add_argument(
+    "--nthreads_start",
+    type=int,
+    required=False,
+    default=1,
+    choices=[1, 2, 4, 8, 16],
+    help="Number of threads to use"
+    )
+    parser.add_argument(
+    "--nthreads_end",
+    type=int,
+    required=False,
+    default=None,
+    choices=[1, 2, 4, 8, 16],
+    help="Number of threads to use"
+    )
+    args = parser.parse_args()
+
+    optimizer = "adam"
+    k_start = args.k_start
+    k_end = args.k_end
+    s_start = args.s_start
+    s_end = args.s_end
+    nthreads_start = args.nthreads_start
+    nthreads_end = args.nthreads_end
+    dataset = "Blog-Nat06all"
+    mode="baseline"
+
+    dataset_data_path = os.path.join(DATA_DIR, dataset)
+    dataset_exp_path = os.path.join(EXP_DIR, dataset)
+    os.makedirs(dataset_exp_path, exist_ok=True)
+
+    if not k_end:
+        k_end = k_start
+    if not nthreads_end:
+        nthreads_end = nthreads_start
+
+
+    thread_range = [t for t in VALID_THREADS if nthreads_start <= t <= nthreads_end]
+
+    for nt in thread_range:
+        thread_exp_path = os.path.join(dataset_exp_path, f"threads_{nt}")
+        os.makedirs(thread_exp_path, exist_ok=True)
+
+        # loop over k and s
+        for k in range(k_start, k_end+1):
+            for s in range(s_start, s_end+1):
+
+                filename = f"k{k}_s{s}.txt"
+                file_path = os.path.join(dataset_data_path, filename)
+
+                if not os.path.exists(file_path):
+                    continue
+
+                json_name = f"k{k}_s{s}.json"
+                json_path = os.path.join(thread_exp_path, json_name)
+
+                # skip if already exists
+                if os.path.exists(json_path):
+                    print(f"Skipping (exists): {json_path}")
+                    continue
+
+                try:
+                    run_single(file_path, optimizer, json_path, mode, nt)
+                except Exception as e:
+                    print(f"Error on {filename} (Threads: {nt}): {e}")
+
+
+if __name__ == "__main__":
+    main()
