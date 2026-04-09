@@ -1,0 +1,21 @@
+{
+    "best_parameters": {
+        "P00": 0.90576171875,
+        "P01": 0.70458984375,
+        "P10": 0.50341796875,
+        "P11": 0.2012939453125
+    },
+    "best_log_likelihood": -Infinity,
+    "peak_vram_mb": 25.693359375,
+    "total_time_seconds": 144.3683044910431,
+    "profiling_timings_seconds": {
+        "init_cpu_gpu": 5.5244128704071045,
+        "warm_up_mcmc_cpu": 0.15024948120117188,
+        "mcmc_cpu": 131.5989806652069,
+        "transfer_pcie": 0.5005927085876465,
+        "gradient_gpu": 6.370110750198364,
+        "optimizer_gpu": 0.10332465171813965,
+        "full_fit": 138.84339427947998,
+        "peak_vram_mb": 25.693359375
+    }
+}
