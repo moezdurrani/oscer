@@ -3,6 +3,7 @@ import numpy as np
 import pandas as pd
 import matplotlib
 from matplotlib.patches import Patch
+from matplotlib.lines import Line2D
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
@@ -14,7 +15,7 @@ OUTPUT_DIR = "./plots"
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 # -----------------------------
-# Colors (FIXED ORDER)
+# Colors
 # -----------------------------
 COLORS = plt.rcParams["axes.prop_cycle"].by_key()["color"]
 
@@ -58,6 +59,7 @@ for dataset in os.listdir(RESULTS_DIR):
 
         df = pd.read_csv(csv_path)
         grouped = df.groupby("k")
+
         k_dict = {}
 
         for k, group in grouped:
@@ -83,12 +85,14 @@ for dataset in os.listdir(RESULTS_DIR):
 
     all_data[dataset] = dataset_dict
 
-# consistent y-axis
+# -----------------------------
+# Consistent Y-axis
+# -----------------------------
 y_pad = (global_max - global_min) * 0.05
 y_lim = (max(0, global_min - y_pad), global_max + y_pad)
 
 # -----------------------------
-# Violin Plot
+# Violin Plot (WITH MEDIAN LINES)
 # -----------------------------
 def violin_plot(dataset, opt1, opt2, data_dict):
     ks = sorted(set(data_dict[opt1].keys()) & set(data_dict[opt2].keys()))
@@ -102,7 +106,6 @@ def violin_plot(dataset, opt1, opt2, data_dict):
 
         positions = []
         groups = []
-        counts = []
 
         for k in ks:
             vals = data_dict[opt][k]
@@ -112,13 +115,12 @@ def violin_plot(dataset, opt1, opt2, data_dict):
             pos = k + (-offset if i == 0 else offset)
             positions.append(pos)
             groups.append(vals)
-            counts.append(len(vals))
 
         vp = ax.violinplot(
             groups,
             positions=positions,
             widths=0.35,
-            showmedians=True,
+            showmedians=False,  # we draw our own median
             showextrema=True
         )
 
@@ -137,16 +139,48 @@ def violin_plot(dataset, opt1, opt2, data_dict):
                 s=10
             )
 
+        # ---- MEDIAN LINE ----
+        medians = [np.median(vals) for vals in groups]
+
+        ax.plot(
+            positions,
+            medians,
+            linestyle="--",
+            linewidth=2,
+            marker="D",
+            markersize=5,
+            color=color,
+        )
+
         # annotate counts
-        for k, count in zip(ks, counts):
+        # ---- Sample count annotations (per optimizer) ----
+        for k in ks:
+            n1 = len(data_dict[opt1][k])
+            n2 = len(data_dict[opt2][k])
+
+            # First optimizer (slightly higher)
             ax.annotate(
-                f"n={count}",
+                f"n={n1}",
                 xy=(k, y_lim[0]),
+                xycoords="data",
                 ha="center",
                 va="top",
                 fontsize=7,
-                color="gray",
+                color=OPT_COLORS[opt1],
                 xytext=(0, -18),
+                textcoords="offset points"
+            )
+
+            # Second optimizer (slightly lower)
+            ax.annotate(
+                f"n={n2}",
+                xy=(k, y_lim[0]),
+                xycoords="data",
+                ha="center",
+                va="top",
+                fontsize=7,
+                color=OPT_COLORS[opt2],
+                xytext=(0, -32),
                 textcoords="offset points"
             )
 
@@ -156,11 +190,14 @@ def violin_plot(dataset, opt1, opt2, data_dict):
     ax.set_ylim(*y_lim)
     ax.grid(True, linestyle="--", alpha=0.4)
 
-    # legend
+    # ---- Legend ----
     legend_elements = [
         Patch(facecolor=OPT_COLORS[opt1], alpha=0.6, label=opt1),
         Patch(facecolor=OPT_COLORS[opt2], alpha=0.6, label=opt2),
+        Line2D([0], [0], color=OPT_COLORS[opt1], linestyle="--", marker="D", label=f"{opt1} median"),
+        Line2D([0], [0], color=OPT_COLORS[opt2], linestyle="--", marker="D", label=f"{opt2} median"),
     ]
+
     ax.legend(handles=legend_elements, fontsize=10, loc="upper right", frameon=False)
 
     fig.subplots_adjust(bottom=0.15)
@@ -202,11 +239,8 @@ def performance_plot(dataset, data_dict):
     ax.legend(frameon=False)
     ax.grid(True, linestyle="--", alpha=0.5)
 
-    fig.savefig(
-        os.path.join(OUTPUT_DIR, f"{dataset}_performance.png"),
-        dpi=150,
-        bbox_inches="tight"
-    )
+    fig.savefig(os.path.join(OUTPUT_DIR, f"{dataset}_performance.png"),
+                dpi=150, bbox_inches="tight")
     plt.close(fig)
 
 
@@ -239,16 +273,13 @@ def avg_l2_plot(dataset, data_dict):
     ax.legend(frameon=False)
     ax.grid(True, linestyle="--", alpha=0.5)
 
-    fig.savefig(
-        os.path.join(OUTPUT_DIR, f"{dataset}_avg_l2.png"),
-        dpi=150,
-        bbox_inches="tight"
-    )
+    fig.savefig(os.path.join(OUTPUT_DIR, f"{dataset}_avg_l2.png"),
+                dpi=150, bbox_inches="tight")
     plt.close(fig)
 
 
 # -----------------------------
-# Generate all plots
+# Generate plots
 # -----------------------------
 for dataset, data_dict in all_data.items():
     violin_plot(dataset, "adam", "adamw", data_dict)
