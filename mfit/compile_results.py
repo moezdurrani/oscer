@@ -19,7 +19,8 @@ def process_dataset(dataset_dir, results_dir):
     csv_path = os.path.join(results_dir, f"{dataset_name}.csv")
 
     rows = []
-    max_theta_len = 0
+    all_param_keys = set()
+    all_profile_keys = set()
 
     for filename in os.listdir(dataset_dir):
         if not filename.endswith(".json"):
@@ -38,29 +39,42 @@ def process_dataset(dataset_dir, results_dir):
             print(f"  Warning: Could not read {filename}: {e}")
             continue
 
-        theta = data.get("theta", [])
-        best_ll = data.get("best_ll", None)
-        time_val = data.get("time", None)
+        # --- Extract new fields ---
+        params = data.get("best_parameters", {})
+        best_ll = data.get("best_log_likelihood", None)
+        total_time = data.get("total_time_seconds", None)
+        profiling = data.get("profiling_timings_seconds", {})
 
-        max_theta_len = max(max_theta_len, len(theta))
+        # Track all keys for dynamic headers
+        all_param_keys.update(params.keys())
+        all_profile_keys.update(profiling.keys())
+
         rows.append({
             "k": k,
             "sample": sample,
-            "time": time_val,
+            "total_time": total_time,
             "best_ll": best_ll,
-            "theta": theta,
+            "params": params,
+            "profiling": profiling,
         })
 
     if not rows:
         print(f"  No valid JSON files found in {dataset_name}, skipping.")
         return
 
-    # Sort by k then sample for readability
+    # Sort by k then sample
     rows.sort(key=lambda r: (r["k"], r["sample"]))
 
-    # Build dynamic headers for theta columns
-    theta_headers = [f"theta_{i}" for i in range(max_theta_len)]
-    fieldnames = ["k", "sample", "time", "best_ll"] + theta_headers
+    # Sort keys for consistent column order
+    param_headers = sorted(all_param_keys)
+    profile_headers = sorted(all_profile_keys)
+
+    # Final column order
+    fieldnames = (
+        ["k", "sample", "total_time", "best_ll"]
+        + param_headers
+        + profile_headers
+    )
 
     with open(csv_path, "w", newline="") as csvfile:
         writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
@@ -70,12 +84,18 @@ def process_dataset(dataset_dir, results_dir):
             flat = {
                 "k": row["k"],
                 "sample": row["sample"],
-                "time": row["time"],
+                "total_time": row["total_time"],
                 "best_ll": row["best_ll"],
             }
-            # Pad theta values if shorter than max
-            for i, val in enumerate(row["theta"]):
-                flat[f"theta_{i}"] = val
+
+            # Add parameters
+            for key in param_headers:
+                flat[key] = row["params"].get(key)
+
+            # Add profiling timings
+            for key in profile_headers:
+                flat[key] = row["profiling"].get(key)
+
             writer.writerow(flat)
 
     print(f"  Wrote {len(rows)} rows -> {csv_path}")
