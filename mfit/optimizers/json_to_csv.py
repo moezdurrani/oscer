@@ -54,11 +54,18 @@ def process_optimizer(dataset_path, optimizer_name, output_csv_path):
 
         k, s = extract_k_s(file)
 
+        params = data.get("best_parameters", {})
+
         row = {
             "k": k,
             "s": s,
             "total_time_seconds": data.get("total_time_seconds"),
             "best_log_likelihood": data.get("best_log_likelihood"),
+
+            "P00": params.get("P00"),
+            "P01": params.get("P01"),
+            "P10": params.get("P10"),
+            "P11": params.get("P11"),
         }
 
         profiling = data.get("profiling_timings_seconds", {})
@@ -72,7 +79,13 @@ def process_optimizer(dataset_path, optimizer_name, output_csv_path):
     rows.sort(key=lambda x: (x["k"], x["s"]))
 
     # -------- WRITE CSV -------- #
-    fieldnames = ["k", "s", "total_time_seconds", "best_log_likelihood"] + all_profile_keys
+    fieldnames = [
+    "k", "s",
+    "total_time_seconds",
+    "best_log_likelihood",
+    "P00", "P01", "P10", "P11"
+    ] + all_profile_keys
+
 
     with open(output_csv_path, "w", newline="") as csvfile:
         writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
