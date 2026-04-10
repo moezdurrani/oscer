@@ -1,0 +1,131 @@
+import os
+import json
+import csv
+
+# -------- PATHS -------- #
+BASE_DIR = "./"  # should be optimizers/
+EXPERIMENTS_DIR = os.path.join(BASE_DIR, "experiments")
+RESULTS_DIR = os.path.join(BASE_DIR, "results")
+# ----------------------- #
+
+def extract_k_s(filename):
+    """
+    Extract k and s from filename like k13_s5.json
+    """
+    name = filename.replace(".json", "")
+    parts = name.split("_")
+    k = int(parts[0][1:])  # remove 'k'
+    s = int(parts[1][1:])  # remove 's'
+    return k, s
+
+
+def process_threads(dataset_path, nthread, output_csv_path):
+    threads_path = os.path.join(dataset_path, nthread)
+
+    if not os.path.exists(threads_path):
+        print(f"Skipping missing threads dir: {threads_path}")
+        return
+
+    rows = []
+    all_profile_keys = set()
+
+    # -------- FIRST PASS: collect all keys -------- #
+    for file in os.listdir(threads_path):
+        if not file.endswith(".json"):
+            continue
+
+        with open(os.path.join(threads_path, file), "r") as f:
+            data = json.load(f)
+
+        profiling = data.get("profiling_timings_seconds", {})
+        all_profile_keys.update(profiling.keys())
+
+    all_profile_keys = sorted(list(all_profile_keys))
+
+    # -------- SECOND PASS: build rows -------- #
+    for file in os.listdir(threads_path):
+        if not file.endswith(".json"):
+            continue
+
+        file_path = os.path.join(threads_path, file)
+        
+        try:
+            with open(file_path, "r") as f:
+                data = json.load(f)
+        except Exception as e:
+            print(f"Skipping {file_path}: {e}")
+            continue
+
+        k, s = extract_k_s(file)
+
+        params = data.get("best_parameters", {})
+
+        row = {
+            "k": k,
+            "s": s,
+            "total_time_seconds": data.get("total_time_seconds"),
+            "best_log_likelihood": data.get("best_log_likelihood"),
+
+            "P00": params.get("P00"),
+            "P01": params.get("P01"),
+            "P10": params.get("P10"),
+            "P11": params.get("P11"),
+        }
+
+        profiling = data.get("profiling_timings_seconds", {})
+
+        for key in all_profile_keys:
+            row[key] = profiling.get(key, None)
+
+        rows.append(row)
+
+    # sort nicely
+    rows.sort(key=lambda x: (x["k"], x["s"]))
+
+    # -------- WRITE CSV -------- #
+    fieldnames = [
+    "k", "s",
+    "total_time_seconds",
+    "best_log_likelihood",
+    "P00", "P01", "P10", "P11"
+    ] + all_profile_keys
+
+
+    with open(output_csv_path, "w", newline="") as csvfile:
+        writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(rows)
+
+    print(f"Saved: {output_csv_path}")
+
+
+def main():
+    if not os.path.exists(RESULTS_DIR):
+        os.makedirs(RESULTS_DIR)
+
+    datasets = os.listdir(EXPERIMENTS_DIR)
+
+    for dataset in datasets:
+        dataset_path = os.path.join(EXPERIMENTS_DIR, dataset)
+
+        if not os.path.isdir(dataset_path):
+            continue
+
+        print(f"\nProcessing dataset: {dataset}")
+
+        # create results/<dataset>/
+        dataset_result_dir = os.path.join(RESULTS_DIR, dataset)
+        os.makedirs(dataset_result_dir, exist_ok=True)
+
+        for nthread in ["threads_1", "threads_2", "threads_4", "threads_8", "threads_16"]:
+            output_csv = os.path.join(dataset_result_dir, f"{nthread}.csv")
+
+            process_threads(
+                dataset_path,
+                nthread,
+                output_csv
+            )
+
+
+if __name__ == "__main__":
+    main()
