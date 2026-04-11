@@ -174,6 +174,9 @@ for dataset, data in all_data.items():
 
     width = 0.35
 
+    counts_mfit    = [len(mfit_dict[k])    for k in ks]
+    counts_kronfit = [len(kronfit_dict[k]) for k in ks]
+
     # MFIT violins (left)
     vp1 = ax.violinplot(
         mfit_groups,
@@ -196,14 +199,15 @@ for dataset, data in all_data.items():
         pc.set_facecolor(KRONFIT_COLOR)
         pc.set_alpha(0.6)
 
-    # Medians
-    mfit_medians = [np.median(mfit_dict[k]) for k in ks]
-    kronfit_medians = [np.median(kronfit_dict[k]) for k in ks]
+    # Median lines aligned to violin centers
+    mfit_xs     = [k - width/2 for k in ks]
+    kronfit_xs  = [k + width/2 for k in ks]
+    mfit_ys     = [np.median(mfit_dict[k])    for k in ks]
+    kronfit_ys  = [np.median(kronfit_dict[k]) for k in ks]
 
-    ax.plot(ks, mfit_medians, color=MFIT_COLOR,
+    ax.plot(mfit_xs, mfit_ys, color=MFIT_COLOR,
             linestyle="--", marker="D", label="MFIT Median")
-
-    ax.plot(ks, kronfit_medians, color=KRONFIT_COLOR,
+    ax.plot(kronfit_xs, kronfit_ys, color=KRONFIT_COLOR,
             linestyle="--", marker="D", label="KronFit Median")
 
     ax.set_ylabel("L2 Norm")
@@ -213,6 +217,15 @@ for dataset, data in all_data.items():
     ax.legend()
     ax.grid(True, linestyle="--", alpha=0.4, axis="y")
 
+    for k, cm, ck in zip(ks, counts_mfit, counts_kronfit):
+        ax.annotate(f"n={cm}", xy=(k, y_lim[0]), xycoords="data",
+                    ha="center", va="top", fontsize=7, color=MFIT_COLOR,
+                    xytext=(0, -20), textcoords="offset points")
+        ax.annotate(f"n={ck}", xy=(k, y_lim[0]), xycoords="data",
+                    ha="center", va="top", fontsize=7, color=KRONFIT_COLOR,
+                    xytext=(0, -32), textcoords="offset points")
+
+    fig.subplots_adjust(bottom=0.20)
     fig.savefig(os.path.join(OUTPUT_DIR, f"{dataset}_violin.png"),
                 dpi=150, bbox_inches="tight")
     plt.close(fig)
