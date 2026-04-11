@@ -9,13 +9,15 @@ import seaborn as sns
 RESULTS_DIR = "./results/Blog-Nat06all"
 GPU_CSV_PATH = "../optimizers/results/Blog-Nat06all/adam.csv"
 PLOTS_DIR = "./plots"
-BREAKDOWN_DIR = os.path.join(PLOTS_DIR, "breakdowns") # New subfolder for the 18 bar charts
+BREAKDOWN_DIR = os.path.join(PLOTS_DIR, "breakdowns")
 
 os.makedirs(PLOTS_DIR, exist_ok=True)
 os.makedirs(BREAKDOWN_DIR, exist_ok=True)
 
 GT = np.array([0.999, 0.578, 0.517, 0.221])
 THREAD_FILES = {1: "threads_1.csv", 2: "threads_2.csv", 4: "threads_4.csv", 8: "threads_8.csv", 16: "threads_16.csv"}
+
+COLORS = plt.rcParams["axes.prop_cycle"].by_key()["color"]
 
 # -------- 1. DATA LOADING & PROCESSING -------- #
 all_data = []
@@ -35,26 +37,27 @@ if os.path.exists(GPU_CSV_PATH):
     gpu_df = pd.read_csv(GPU_CSV_PATH)
     gpu_avg = gpu_df.groupby('k').mean(numeric_only=True).reset_index()
     gpu_avg['label'] = 'GPU'
-    gpu_avg['n_threads'] = 99 
+    gpu_avg['n_threads'] = 99
     gpu_avg['is_gpu'] = True
     all_data.append(gpu_avg)
 
 master_df = pd.concat(all_data, ignore_index=True)
 master_df['l2_norm'] = np.sqrt(((master_df[["P00","P01","P10","P11"]].values - GT)**2).sum(axis=1))
 
-# -------- 2. LINE PLOTS (Performance, Speedup, Accuracy) -------- #
-# (Using the same integer-tick logic we established earlier)
+# -------- 2. LINE PLOTS -------- #
 
 def format_line_plot(title, ylabel, filename, is_log=False):
     plt.gca().xaxis.set_major_locator(ticker.MultipleLocator(1))
     plt.xticks(range(1, 19))
-    plt.title(title)
+    plt.title(title, fontweight="bold")
     plt.ylabel(ylabel)
     plt.xlabel('k')
-    if is_log: plt.yscale('log')
-    plt.grid(True, which="both", ls="-", alpha=0.2)
+    if is_log:
+        plt.yscale('log')
+    plt.grid(True, linestyle="--", alpha=0.4)
+    plt.legend(frameon=False)
     plt.tight_layout()
-    plt.savefig(os.path.join(PLOTS_DIR, filename))
+    plt.savefig(os.path.join(PLOTS_DIR, filename), dpi=150, bbox_inches="tight")
     plt.close()
 
 # 01a: Log Performance
@@ -82,36 +85,35 @@ plt.figure(figsize=(10, 6))
 sns.lineplot(data=master_df, x='k', y='l2_norm', hue='label', marker='s')
 format_line_plot('Parameter Accuracy (L2 Error) vs k', 'L2 Distance to Ground Truth', 'accuracy_vs_k.png')
 
-# -------- 3. STACKED BARS FOR ALL K (1 to 18) -------- #
+# -------- 3. STACKED BARS FOR ALL K -------- #
 print("Generating breakdown bars for all k...")
 
-# Get all k values that exist in the thread_1 results
 k_values = sorted(master_df[master_df['n_threads'] == 1]['k'].unique())
 
 for k in k_values:
     bar_data = master_df[master_df['k'] == k].sort_values('n_threads')
-    
-    if bar_data.empty: continue
-    
-    mcmc = bar_data['mcmc_cpu'] + bar_data['warm_up_mcmc_cpu']
+
+    if bar_data.empty:
+        continue
+
+    mcmc     = bar_data['mcmc_cpu'] + bar_data['warm_up_mcmc_cpu']
     gradient = bar_data['gradient_gpu'] + bar_data['optimizer_gpu']
     overhead = bar_data['init_cpu_gpu'] + bar_data['transfer_pcie']
-    labels = bar_data['label'].tolist()
+    labels   = bar_data['label'].tolist()
 
     plt.figure(figsize=(12, 7))
-    plt.bar(labels, mcmc, label='MCMC (Sequential)', color='#e74c3c')
-    plt.bar(labels, gradient, bottom=mcmc, label='Gradient + Opt (Parallel)', color='#3498db')
-    plt.bar(labels, overhead, bottom=mcmc+gradient, label='Overhead', color='#95a5a6')
+    plt.bar(labels, mcmc,     label='MCMC (Sequential)',          color=COLORS[3])
+    plt.bar(labels, gradient, bottom=mcmc,          label='Gradient + Opt (Parallel)', color=COLORS[0])
+    plt.bar(labels, overhead, bottom=mcmc+gradient, label='Overhead',                  color=COLORS[7])
 
-    plt.title(f'Execution Time Breakdown Analysis (k={int(k)})')
+    plt.title(f'Execution Time Breakdown Analysis (k={int(k)})', fontweight="bold")
     plt.ylabel('Time (seconds)')
     plt.xlabel('Execution Mode')
-    plt.legend()
-    plt.grid(axis='y', linestyle='--', alpha=0.3)
+    plt.legend(frameon=False)
+    plt.grid(axis='y', linestyle='--', alpha=0.4)
     plt.tight_layout()
-    
-    # Save each bar chart with its k-value in the filename
-    plt.savefig(os.path.join(BREAKDOWN_DIR, f'breakdown_k{int(k):02d}.png'))
+    plt.savefig(os.path.join(BREAKDOWN_DIR, f'breakdown_k{int(k):02d}.png'),
+                dpi=150, bbox_inches="tight")
     plt.close()
 
 print(f"\nDone! Summary plots are in /plots and breakdown bars for each k are in /plots/breakdowns/")
