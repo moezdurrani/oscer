@@ -1,3 +1,4 @@
+#big data sets
 import os
 import numpy as np
 import pandas as pd
@@ -177,6 +178,11 @@ for dataset, data in all_data.items():
     counts_mfit    = [len(mfit_dict[k])    for k in ks]
     counts_kronfit = [len(kronfit_dict[k]) for k in ks]
 
+    # Fix 1: use prop_cycle colors instead of hardcoded strings
+    COLORS = plt.rcParams["axes.prop_cycle"].by_key()["color"]
+    MFIT_COLOR = COLORS[0]
+    KRONFIT_COLOR = COLORS[1]
+
     # MFIT violins (left)
     vp1 = ax.violinplot(
         mfit_groups,
@@ -199,11 +205,22 @@ for dataset, data in all_data.items():
         pc.set_facecolor(KRONFIT_COLOR)
         pc.set_alpha(0.6)
 
+    # Fix 2: jitter dots
+    for pos, vals in zip([k - width/2 for k in ks], mfit_groups):
+        jitter = np.random.uniform(-0.05, 0.05, size=len(vals))
+        ax.scatter(np.full(len(vals), pos) + jitter, vals,
+                   color="black", alpha=0.3, s=10, zorder=5)
+
+    for pos, vals in zip([k + width/2 for k in ks], kronfit_groups):
+        jitter = np.random.uniform(-0.05, 0.05, size=len(vals))
+        ax.scatter(np.full(len(vals), pos) + jitter, vals,
+                   color="black", alpha=0.3, s=10, zorder=5)
+
     # Median lines aligned to violin centers
-    mfit_xs     = [k - width/2 for k in ks]
-    kronfit_xs  = [k + width/2 for k in ks]
-    mfit_ys     = [np.median(mfit_dict[k])    for k in ks]
-    kronfit_ys  = [np.median(kronfit_dict[k]) for k in ks]
+    mfit_xs    = [k - width/2 for k in ks]
+    kronfit_xs = [k + width/2 for k in ks]
+    mfit_ys    = [np.median(mfit_dict[k])    for k in ks]
+    kronfit_ys = [np.median(kronfit_dict[k]) for k in ks]
 
     ax.plot(mfit_xs, mfit_ys, color=MFIT_COLOR,
             linestyle="--", marker="D", label="MFIT Median")
@@ -214,8 +231,18 @@ for dataset, data in all_data.items():
     ax.set_title(f"{dataset} - L2 Distribution vs k", fontweight="bold")
     ax.set_xticks(ks)
     ax.set_ylim(*y_lim)
-    ax.legend()
-    ax.grid(True, linestyle="--", alpha=0.4, axis="y")
+    ax.grid(True, linestyle="--", alpha=0.4, axis="both")
+
+    # Fix 3: Patch+Line2D legend like optimizer script
+    from matplotlib.patches import Patch
+    from matplotlib.lines import Line2D
+    legend_elements = [
+        Patch(facecolor=MFIT_COLOR, alpha=0.6, label="MFIT"),
+        Patch(facecolor=KRONFIT_COLOR, alpha=0.6, label="KronFit"),
+        Line2D([0], [0], color=MFIT_COLOR, linestyle="--", marker="D", label="MFIT Median"),
+        Line2D([0], [0], color=KRONFIT_COLOR, linestyle="--", marker="D", label="KronFit Median"),
+    ]
+    ax.legend(handles=legend_elements, fontsize=10, loc="upper right", frameon=False)
 
     for k, cm, ck in zip(ks, counts_mfit, counts_kronfit):
         ax.annotate(f"n={cm}", xy=(k, y_lim[0]), xycoords="data",
@@ -228,6 +255,7 @@ for dataset, data in all_data.items():
     fig.subplots_adjust(bottom=0.20)
     fig.savefig(os.path.join(OUTPUT_DIR, f"{dataset}_violin.png"),
                 dpi=150, bbox_inches="tight")
+    print(f"Violin Plot for {dataset} saved")
     plt.close(fig)
 
 
@@ -254,6 +282,7 @@ for dataset, data in all_data.items():
 
     fig.savefig(os.path.join(OUTPUT_DIR, f"{dataset}_performance.png"),
                 dpi=150, bbox_inches="tight")
+    print(f"Performance Plot for {dataset} saved")
     plt.close(fig)
 
 print("All plots saved in:", OUTPUT_DIR)
