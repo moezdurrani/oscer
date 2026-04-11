@@ -216,6 +216,7 @@ def violin_plot(dataset, opt1, opt2, data_dict):
 def performance_plot(dataset, data_dict):
     fig, ax = plt.subplots(figsize=(8, 5))
 
+    ks = None
     for opt in optimizers:
         if opt not in data_dict:
             continue
@@ -237,11 +238,14 @@ def performance_plot(dataset, data_dict):
     ax.set_title(f"{dataset} - Performance (Time vs k)", fontweight="bold")
     ax.set_xlabel("k")
     ax.set_ylabel("Total Time (seconds)")
+    if ks:
+        ax.set_xticks(ks)
     ax.legend(frameon=False)
     ax.grid(True, linestyle="--", alpha=0.5)
 
     fig.savefig(os.path.join(OUTPUT_DIR, f"{dataset}_performance.png"),
                 dpi=150, bbox_inches="tight")
+    print(f"Performance Plot for {dataset} saved")
     plt.close(fig)
 
 
@@ -271,11 +275,13 @@ def avg_l2_plot(dataset, data_dict):
     ax.set_xlabel("k")
     ax.set_ylabel("Average L2 Norm")
     ax.set_ylim(*y_lim)
+    ax.set_xticks(ks)
     ax.legend(frameon=False)
     ax.grid(True, linestyle="--", alpha=0.5)
 
     fig.savefig(os.path.join(OUTPUT_DIR, f"{dataset}_avg_l2.png"),
                 dpi=150, bbox_inches="tight")
+    print(f"Avg L2 Plot for {dataset} saved")
     plt.close(fig)
 
 
